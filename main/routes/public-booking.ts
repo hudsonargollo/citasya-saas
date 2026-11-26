@@ -39,12 +39,13 @@ function groupServices() {
   return { services, categories };
 }
 
-router.get('/config', (_req: Request, res: Response) => {
+router.get('/config', (req: Request, res: Response) => {
   try {
     const settings = getSettings();
     const booking = getBookingSettings();
     const loyalty = getLoyaltyConfig();
     const { services, categories } = groupServices();
+    const tenant = req.tenant;
     const branches = (getDatabase().prepare(
       `SELECT id, name, COALESCE(zone,'') AS zone, COALESCE(whatsapp_url,'') AS whatsappUrl,
               COALESCE(maps_url,'') AS mapsUrl, sort_order AS sortOrder
@@ -75,6 +76,12 @@ router.get('/config', (_req: Request, res: Response) => {
         currencySymbol: settings.currency_symbol || 'Bs',
         timezone: settings.timezone || 'America/La_Paz',
       },
+      tenant: tenant ? {
+        slug: tenant.slug,
+        name: tenant.name,
+        publicUrl: tenant.public_url,
+        assetBase: `/tenant-assets/${tenant.slug}`,
+      } : null,
       loyalty,
       services,
       categories,

@@ -56,6 +56,12 @@ export interface BookingConfig {
     policies: string[];
   };
   business: BookingBusiness;
+  tenant?: {
+    slug: string;
+    name: string;
+    publicUrl: string;
+    assetBase: string;
+  } | null;
   loyalty: BookingLoyalty;
   services: BookingService[];
   categories: BookingCategory[];

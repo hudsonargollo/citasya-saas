@@ -63,6 +63,11 @@ const LOGO = '/cixnails/logo.webp';
 // Cropped embossed artwork (transparent paper) — featured large on the page.
 const LOGO_MARK = '/cixnails/logo-mark.webp';
 
+/** Tenant asset URL with fallback to the shared brand asset. */
+function tenantAsset(config: BookingConfig | null, file: string, fallback: string): string {
+  return config?.tenant?.assetBase ? `${config.tenant.assetBase}/${file}` : fallback;
+}
+
 export default function BookingPage() {
   const [config, setConfig] = useState<BookingConfig | null>(null);
   const [configLoading, setConfigLoading] = useState(true);
@@ -104,6 +109,12 @@ export default function BookingPage() {
       setConfigLoading(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (config?.business?.name && typeof document !== 'undefined') {
+      document.title = `${config.business.name} · Reservas`;
+    }
+  }, [config?.business?.name]);
 
   useEffect(() => {
     loadConfig();
@@ -268,7 +279,7 @@ export default function BookingPage() {
     else if (whatsappUrl) window.open(whatsappUrl, '_blank');
   };
   const instagramUrl = `https://instagram.com/${business?.instagram || FALLBACK_INSTAGRAM}`;
-  const stylistName = config?.booking.stylist.name || 'Cix Nail Artist';
+  const stylistName = config?.booking.stylist.name || config?.business.name || 'Cix Nail Artist';
   const phoneDigits = customerPhone.replace(/\D/g, '');
   const branches = config?.branches ?? [];
   const showBranches = branches.length > 0;
@@ -319,7 +330,7 @@ export default function BookingPage() {
       <div className="booking-root" data-theme={isDarkMode ? 'dark' : 'light'}>
         <div className="booking-frame flex flex-col items-center justify-center p-6 text-center">
           <div className="w-24 h-24 mb-6 animate-pulse-soft">
-            <img src={LOGO} alt="Cix Nail Artist" className="w-full h-full object-contain" />
+            <img src={tenantAsset(config, 'logo.webp', LOGO)} alt={config?.business.name || "Cix Nail Artist"} className="w-full h-full object-contain" />
           </div>
           <p className="text-sm tracking-widest uppercase" style={{ color: 'var(--text-secondary)' }}>{t('loading', lang)}</p>
         </div>
@@ -332,9 +343,9 @@ export default function BookingPage() {
       <div className="booking-root" data-theme={isDarkMode ? 'dark' : 'light'}>
         <div className="booking-frame flex flex-col items-center justify-center p-8 text-center">
           <div className="w-20 h-20 mb-6">
-            <img src={LOGO} alt="Cix Nail Artist" className="w-full h-full object-contain" />
+            <img src={tenantAsset(config, 'logo.webp', LOGO)} alt={config?.business.name || "Cix Nail Artist"} className="w-full h-full object-contain" />
           </div>
-          <h1 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--text-primary)' }}>Cix Nail Artist</h1>
+          <h1 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--text-primary)' }}>{config?.business.name || 'Cix Nail Artist'}</h1>
           <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>{configError ? t('loadError', lang) : t('servicesUnavailable', lang)}</p>
           <button onClick={loadConfig} className="btn-brand px-8 py-3 rounded-full text-xs font-medium tracking-widest uppercase" style={{ position: 'relative', right: 'auto' }}>
             {t('retry', lang)}
@@ -349,9 +360,9 @@ export default function BookingPage() {
       <div className="booking-root" data-theme={isDarkMode ? 'dark' : 'light'}>
         <div className="booking-frame flex flex-col items-center justify-center p-8 text-center">
           <div className="w-24 h-24 mb-6">
-            <img src={LOGO} alt="Cix Nail Artist" className="w-full h-full object-contain" />
+            <img src={tenantAsset(config, 'logo.webp', LOGO)} alt={config?.business.name || "Cix Nail Artist"} className="w-full h-full object-contain" />
           </div>
-          <h1 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--text-primary)' }}>Cix Nail Artist</h1>
+          <h1 className="font-display text-3xl font-light mb-3" style={{ color: 'var(--text-primary)' }}>{config?.business.name || 'Cix Nail Artist'}</h1>
           <p className="text-sm leading-relaxed mb-6" style={{ color: 'var(--text-secondary)' }}>
             {t('bookingPaused', lang)}
           </p>
@@ -376,7 +387,7 @@ export default function BookingPage() {
       <div className="booking-root" data-theme={isDarkMode ? 'dark' : 'light'}>
         <div className="booking-frame flex flex-col items-center justify-center p-6 text-center animate-fade-in">
           <div className="mb-8">
-            <img src={LOGO_MARK} alt="Cix Nail Artist" className="logo-mark w-32 mx-auto object-contain" />
+            <img src={tenantAsset(config, 'logo-mark.webp', LOGO_MARK)} alt={config?.business.name || "Cix Nail Artist"} className="logo-mark w-32 mx-auto object-contain" />
           </div>
 
           <div className="w-20 h-20 rounded-full flex items-center justify-center mb-6" style={{ backgroundColor: 'rgba(166,90,76,0.12)', border: '1.5px solid var(--brand-accent)' }}>
@@ -665,8 +676,8 @@ export default function BookingPage() {
         <div className="flex flex-col items-center text-center pt-14 pb-6 px-6">
           <div className="mb-5">
             <img
-              src={LOGO_MARK}
-              alt="Cix Nail Artist"
+              src={tenantAsset(config, 'logo-mark.webp', LOGO_MARK)}
+              alt={config?.business.name || "Cix Nail Artist"}
               className="logo-mark w-60 md:w-80 object-contain animate-fade-in-up"
             />
           </div>
@@ -891,7 +902,7 @@ export default function BookingPage() {
 
         <div className="px-6 pb-14 text-center">
           <div className="divider mb-5" />
-          <p className="font-display text-xl font-light mb-1" style={{ color: 'var(--text-primary)' }}>Cix Nail Artist</p>
+          <p className="font-display text-xl font-light mb-1" style={{ color: 'var(--text-primary)' }}>{config?.business.name || 'Cix Nail Artist'}</p>
           <p className="text-[10px] uppercase tracking-[0.2em] mb-3" style={{ color: 'var(--text-disabled)' }}>{t('tagline', lang)}</p>
           <p className="text-xs mb-1" style={{ color: 'var(--text-disabled)' }}>
             {business?.address || branches[0]?.zone || ''}

@@ -54,6 +54,31 @@ export function startServer(): Promise<void> {
     const frontendDir = getFrontendDir();
     if (frontendDir) {
       console.log(`[Server] Serving frontend from: ${frontendDir}`);
+      // Per-tenant asset overlay: tenants/<slug>/assets/ falls back to the
+      // shared build assets. Provisioned tenants can drop logo.webp etc here.
+      const tenantAssetsRoot = process.env.CITASYA_TENANT_ASSETS
+        || path.join(__dirname, '../tenants');
+      app.use('/tenant-assets', (req: Request, res: Response, next: NextFunction) => {
+        const slug = req.tenant?.slug;
+        if (!slug) return next();
+        const tenantDir = path.join(tenantAssetsRoot, slug, 'assets');
+        // Inside app.use('/tenant-assets'), req.path still contains '/<slug>/...'.
+        const rel = req.path.replace(/^\/+/, '').replace(new RegExp(`^${slug}/`), '');
+        if (!rel || rel.includes('..') || rel.includes('\\') || path.isAbsolute(rel)) {
+          res.status(400).json({ error: 'Invalid asset path' });
+          return;
+        }
+        const candidate = path.join(tenantDir, rel);
+        if (fs.existsSync(candidate) && fs.statSync(candidate).isFile()) {
+          return res.sendFile(candidate);
+        }
+        // Fallback to the shared brand assets in the static export.
+        const shared = path.join(frontendDir, 'cixnails', rel);
+        if (fs.existsSync(shared) && fs.statSync(shared).isFile()) {
+          return res.sendFile(shared);
+        }
+        res.status(404).json({ error: 'Asset not found' });
+      });
       app.use(express.static(frontendDir));
       app.get(/^(?!\/api).*$/, (_req: Request, res: Response) => {
         res.sendFile(path.join(frontendDir, 'index.html'));
