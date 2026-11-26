@@ -1,7 +1,11 @@
 # CitasYa → multi-tenant SaaS on the CixNail engine — migration plan
 
-Status: planning only. No repos, DNS, nginx, systemd or databases were modified.
+Status: IMPLEMENTED through Phase 6 (tenant 1 live). Phases 7-8 pending user direction.
 Date: 2026-11-26.
+Actual cutover: exact nginx vhost for cixnailspa.clubemkt.digital → 127.0.0.1:3032
+(not a regex catch-all); service citasya-saas.service, env /etc/citasya-saas.env,
+data /var/lib/citasya-saas/. The legacy cixnails.service (3021) stays running and
+untouched, as requested.
 Target repo: https://github.com/hudsonargollo/citasya-saas.git (cloned at `/root/ClubeMkt/citasya-saas`, HEAD `1b328fc`, initially empty).
 Confirmed tenant-1 slug: `cixnailspa`. Legacy `cixnails.clubemkt.digital` is out of scope — no alias or redirect required.
 
@@ -83,7 +87,10 @@ Current: `main/db.ts:8 let db: Database.Database`, `getDatabase()` module-level 
 ### 3.6 Deployment
 - New systemd unit `citasya-saas.service`: `WorkingDirectory=/root/ClubeMkt/citasya-saas`, `EnvironmentFile=/etc/citasya-saas.env`, `ExecStart=/usr/local/bin/node dist/web.js`, `PORT=3021` **after** cixnails is stopped/cut over (or use a distinct port during parallel testing, e.g. 3030).
 - New env: `PORT`, `CITASYA_SAAS_DATA_DIR=/var/lib/citasya-saas`, `CONTROL_DB_PATH`, `JWT_SECRET` (global signing secret; tenant binding via claim), `PUBLIC_BOOKING_URL` as fallback only.
-- nginx: replace the exact `cixnails.clubemkt.digital` block with a regex catch-all:
+- nginx: an exact `server_name cixnailspa.clubemkt.digital` block was installed at
+  `/etc/nginx/sites-enabled/citasya-saas` → `127.0.0.1:3032`. This wins over the
+  wildcard without affecting any other site. To add a future tenant, add another
+  exact block (or switch to a regex catch-all once several tenants are live):
   ```
   server {
       listen 80;
@@ -122,7 +129,7 @@ The landing is one Blade file with only 4 live integration points. Options:
 3. **Security gate** — JWT middleware on all non-public API routes; tenant claim check; rate buckets/WS scoped. Acceptance: token from tenant A cannot read tenant B's `/api/appointments`, `/api/customers`, `/api/settings`, or `/api/public/booking/config`.
 4. **Branding** — config-driven strings/assets/colors. Acceptance: tenant 2 shows its own name/logo/WhatsApp on `/agendar` while tenant 1 is unchanged.
 5. **Tenant 1 data migration** — copy live cixnails DB into `cixnailspa`, update settings, keep branches. Acceptance: all existing appointments/services/branches visible on `cixnailspa.clubemkt.digital/agendar`; admin login works.
-6. **Cutover** — nginx regex vhost + systemd service; keep cixnails service stopped after verification (rollback = re-enable it and restore its vhost). Acceptance: `cixnailspa.clubemkt.digital/` → `/agendar`, `/auth/login/` → admin, `/pos` after login; legacy `cixnails.clubemkt.digital` intentionally not served.
+6. **Cutover** — exact nginx vhost + systemd service; keep cixnails service stopped after verification (rollback = re-enable it and restore its vhost). Acceptance: `cixnailspa.clubemkt.digital/` → `/agendar`, `/auth/login/` → admin, `/pos` after login; legacy `cixnails.clubemkt.digital` intentionally not served.
 7. **Landing CTA rewiring** — the minimal Blade edit from §3.7. Acceptance: landing still renders identically; primary CTA lands on tenant booking.
 8. **Provision tenant 2** — run `provision-tenant.mjs`, add branding overlay, verify isolation. This proves the SaaS claim rather than a single rebrand.
 
@@ -147,3 +154,11 @@ curl -sI https://unknown-slug.clubemkt.digital/           # 404
 curl -sI https://cixnailspa.clubemkt.digital/api/health   # 200
 ```
 Plus the phase-3 cross-tenant isolation tests against two provisioned slugs.
+
+
+## Verified live (2026-11-26)
+
+- `https://cixnailspa.clubemkt.digital/` → 302 `/agendar`; `/agendar/` → 200; `/auth/login/` → 200; `/api/health` → 200.
+- Public config: business Cix Nail Artist, tenant `cixnailspa`, 15 services, 3 branches (real data copied from the live cixnails DB).
+- `/api/appointments` unauthenticated → 401; admin login returns a tenant-bound JWT; unknown subdomain → 404.
+- Both `citasya-saas.service` (3032) and `cixnails.service` (3021) active; legacy domain and CitasYa landing still 200.
