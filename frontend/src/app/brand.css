@@ -1,0 +1,204 @@
+/* ─────────────────────────────────────────────────────────────
+   Cix Nail Artist — shared brand tokens (booking + admin)
+   Palette: antique rose / rosewood / cream, from the salon's
+   neutral, spa-like aesthetic.
+
+   The cream paper values (--ebg*) were sampled from the CIX logo
+   cardstock: avg RGB (229, 218, 204) = #E5DACC. The real paper
+   texture is imgs/bck.webp, served at /cixnails/bck.webp.
+   ───────────────────────────────────────────────────────────── */
+
+/* ── Base tokens (dark theme) ────────────────────────────────── */
+.booking-root,
+.admin-root {
+  --brand-copper: #a65a4c;
+  --brand-copper-soft: #8e4e43;
+  --brand-accent: #a65a4c;
+  --brand-accent-soft: #8e4e43;
+  --brand-wood: #7a4038;
+  --brand-cream: #f3e7e2;
+
+  /* Embossed paper background — matches the logo cardstock */
+  --ebg: #e5dacc;
+  --ebg-paper: #f3efe8;
+  --ebg-fibre: #e6e0d2;
+  --ebg-detail: #d8cfc0;
+  --ebg-accent: #c9a87c;
+  --ebg-ink: #3b2b21;
+
+  /* Real paper texture from imgs/bck.webp — the original file, verbatim.
+     It covers the viewport (no tiling), so the cropped embossed logo-mark sits
+     on one continuous sheet. --ebg is the sampled average colour beneath it. */
+  --ebg-image: url('/cixnails/bck.webp');
+
+  --bg-app: #1c1413;
+  --bg-surface: #271d1b;
+  --bg-surface-hover: #332623;
+  --bg-surface-active: #402f2b;
+  --border-subtle: #47332f;
+  --text-primary: #f9f0ec;
+  --text-secondary: #d6c0b7;
+  --text-disabled: #9c8279;
+  --btn-primary-bg: #2b1b18;
+  --btn-primary-text: #f0c8bd;
+  --btn-primary-border: #a65a4c;
+  --slot-available-bg: var(--bg-surface);
+  --slot-selected-bg: #a65a4c;
+  --slot-selected-text: #1c1413;
+  --accent-line: #a65a4c;
+  --canvas-image: var(--ebg-image);
+
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: var(--font-body), 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── Embossed paper palette — reused by the light theme and .ebg ── */
+.booking-root[data-theme='light'],
+.admin-root[data-theme='light'],
+.ebg {
+  --bg-app: var(--ebg);
+  --bg-surface: var(--ebg-paper);
+  --bg-surface-hover: var(--ebg-fibre);
+  --bg-surface-active: var(--ebg-detail);
+  --border-subtle: #cbb9a2;
+  --text-primary: var(--ebg-ink);
+  --text-secondary: #6b5445;
+  --text-disabled: #9c8571;
+  --btn-primary-bg: #7a4038;
+  --btn-primary-text: #fff3ee;
+  --btn-primary-border: #7a4038;
+  --slot-available-bg: var(--ebg-paper);
+  --slot-selected-bg: #7a4038;
+  --slot-selected-text: #fff3ee;
+  --accent-line: #a65a4c;
+  --canvas-image: var(--ebg-image);
+
+  color: var(--text-primary);
+}
+
+/* ── Typography / shared controls ───────────────────────────── */
+.booking-root h2,
+.booking-root h3,
+.booking-root .font-display,
+.admin-root h1,
+.admin-root h2,
+.admin-root h3,
+.admin-root .font-display {
+  font-family: var(--font-display), 'Cormorant Garamond', Georgia, serif;
+}
+
+.booking-root .btn-brand,
+.admin-root .btn-brand {
+  background-color: var(--btn-primary-bg);
+  color: var(--btn-primary-text);
+  border: 1px solid var(--btn-primary-border);
+}
+.booking-root .btn-brand:hover,
+.admin-root .btn-brand:hover {
+  opacity: 0.88;
+}
+
+.booking-root input,
+.booking-root textarea,
+.admin-root input,
+.admin-root textarea {
+  outline: none;
+}
+.booking-root input:focus,
+.booking-root textarea:focus,
+.admin-root input:focus,
+.admin-root textarea:focus {
+  box-shadow: 0 0 0 1.5px var(--accent-line);
+}
+
+.booking-root .divider,
+.admin-root .divider {
+  height: 1px;
+  background: var(--border-subtle);
+}
+
+/* Admin surfaces consume the shadcn-style variables used by the UI kit;
+   map them onto the brand tokens so cards, inputs and nav stay on-brand. */
+.admin-root {
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --card: var(--bg-surface);
+  --card-foreground: var(--text-primary);
+  --primary: var(--btn-primary-bg);
+  --primary-foreground: var(--btn-primary-text);
+  --secondary: var(--bg-surface-hover);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-surface-hover);
+  --muted-foreground: var(--text-secondary);
+  --accent: var(--bg-surface-active);
+  --accent-foreground: var(--text-primary);
+  --border: var(--border-subtle);
+  --input: var(--border-subtle);
+  --ring: var(--accent-line);
+  --sidebar: var(--bg-surface);
+  --sidebar-foreground: var(--text-primary);
+  --sidebar-primary: var(--brand-accent);
+  --sidebar-primary-foreground: #1c1413;
+  --sidebar-accent: var(--bg-surface-hover);
+  --sidebar-accent-foreground: var(--accent-line);
+  --sidebar-border: var(--border-subtle);
+}
+
+/* ── App canvases ────────────────────────────────────────────── */
+/* Full-screen paper: the background image covers the viewport (no tiling) in
+   both themes, so the cropped embossed logo sits on one continuous sheet. */
+.admin-root,
+.booking-frame {
+  background-color: var(--bg-app);
+  background-image: var(--canvas-image);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  background-attachment: fixed;
+  color: var(--text-primary);
+  font-family: var(--font-body), 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  min-height: 100vh;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── .ebg — reusable embossed-paper utility ───────────────────
+   Apply directly to any container to give it the real paper texture. */
+.ebg {
+  background-color: var(--ebg);
+  background-image: var(--ebg-image);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
+  font-family: var(--font-body), 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Embossed logo mark ───────────────────────────────────────
+ logo-mark.webp is the copper artwork cut out of the cardstock (transparent
+ paper). It is featured large, with a soft shadow that lifts it off the
+ page. Apply to the img itself.
+
+ drop-shadow tracks the glyph outlines, so the transparent paper lets the
+ page's own paper texture show through — the logo sits ON the background
+ rather than on a second sheet. */
+.logo-mark {
+filter: drop-shadow(0 18px 32px rgba(28, 20, 19, 0.38));
+}
+.booking-root[data-theme='light'] .logo-mark,
+.admin-root[data-theme='light'] .logo-mark,
+.ebg .logo-mark {
+  filter: drop-shadow(0 18px 32px rgba(90, 62, 45, 0.34));
+}
+.ebg .ebg-paper { background-color: var(--ebg-paper); }
+.ebg .ebg-fibre { background-color: var(--ebg-fibre); }
+.ebg .ebg-detail { background-color: var(--ebg-detail); }
+.ebg .ebg-accent { background-color: var(--ebg-accent); }
+.ebg,
+.ebg * {
+  transition: background-color 0.3s ease, color 0.3s ease;
+}

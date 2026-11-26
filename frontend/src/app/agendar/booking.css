@@ -1,0 +1,78 @@
+/* ─────────────────────────────────────────────────────────────
+   Cix Nail Artist — public booking page
+   Brand tokens live in app/brand.css (shared with admin).
+   ───────────────────────────────────────────────────────────── */
+
+.booking-root .no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.booking-root .no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+.booking-root .slot-available {
+  background-color: var(--slot-available-bg);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-primary);
+}
+.booking-root .slot-available:hover {
+  background-color: var(--bg-surface-hover);
+  border-color: var(--accent-line);
+}
+.booking-root .slot-selected {
+  background-color: var(--slot-selected-bg) !important;
+  color: var(--slot-selected-text) !important;
+  border-color: var(--slot-selected-bg) !important;
+}
+.booking-root .slot-disabled {
+  background-color: var(--bg-surface);
+  color: var(--text-disabled);
+  border: 1px solid var(--border-subtle);
+  cursor: not-allowed;
+  text-decoration: line-through;
+}
+
+.booking-root .booking-frame {
+  max-width: 28rem;
+  margin-left: auto;
+  margin-right: auto;
+  min-height: 100vh;
+  position: relative;
+  /* overflow is visible so the logo's soft drop shadow is not clipped at the
+     frame's top edge; content still scrolls. */
+  overflow-x: hidden;
+  box-shadow: 0 0 60px rgba(0, 0, 0, 0.45);
+  /* Paper palette + grain come from brand.css (.booking-frame) so the
+     frame follows the theme: cream cardstock in light, espresso in dark. */
+}
+
+@keyframes booking-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes booking-fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes booking-slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes booking-pulse-soft {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+.booking-root .animate-fade-in {
+  animation: booking-fade-in 0.4s ease-in-out;
+}
+.booking-root .animate-fade-in-up {
+  animation: booking-fade-in-up 0.4s ease-out;
+}
+.booking-root .animate-slide-up {
+  animation: booking-slide-up 0.5s cubic-bezier(0.33, 1, 0.68, 1);
+}
+.booking-root .animate-pulse-soft {
+  animation: booking-pulse-soft 1.6s ease-in-out infinite;
+}
