@@ -15,12 +15,13 @@ const router = Router();
 
 // Very small in-memory guard so the public endpoint isn't trivially spammed.
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
-function isRateLimited(ip: string): boolean {
+function isRateLimited(ip: string, tenantSlug: string): boolean {
   const nowMs = Date.now();
   const windowMs = 60 * 60 * 1000;
-  const bucket = rateBuckets.get(ip);
+  const key = `${tenantSlug}:${ip}`;
+  const bucket = rateBuckets.get(key);
   if (!bucket || bucket.resetAt < nowMs) {
-    rateBuckets.set(ip, { count: 1, resetAt: nowMs + windowMs });
+    rateBuckets.set(key, { count: 1, resetAt: nowMs + windowMs });
     return false;
   }
   bucket.count += 1;
@@ -122,7 +123,7 @@ router.get('/client', (req: Request, res: Response) => {
 router.post('/appointments', (req: Request, res: Response) => {
   try {
     const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    if (isRateLimited(ip)) {
+    if (isRateLimited(ip, req.tenant?.slug || 'default')) {
       return res.status(429).json({ error: 'Demasiados intentos. Espera unos minutos e inténtalo de nuevo.' });
     }
 

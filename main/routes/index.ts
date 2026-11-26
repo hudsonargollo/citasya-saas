@@ -75,8 +75,8 @@ export function registerRoutes(app: Express): void {
   app.patch('/api/orders/:orderId/items/:itemId/cancel', (req, res) => {
     try {
       const { orderId, itemId } = req.params;
-      const userRole = req.headers['x-user-role'] as string;
-      if (!userRole || !['owner', 'manager'].includes(userRole.toLowerCase())) {
+      const userRole = req.user?.role || '';
+      if (!['owner', 'manager'].includes(userRole.toLowerCase())) {
         return res.status(403).json({ error: 'Only owner or manager can cancel items' });
       }
       const db = getDatabase();
@@ -106,8 +106,8 @@ export function registerRoutes(app: Express): void {
   app.patch('/api/orders/:orderId/items/:itemId/restore', (req, res) => {
     try {
       const { orderId, itemId } = req.params;
-      const userRole = req.headers['x-user-role'] as string;
-      if (!userRole || !['owner', 'manager'].includes(userRole.toLowerCase())) {
+      const userRole = req.user?.role || '';
+      if (!['owner', 'manager'].includes(userRole.toLowerCase())) {
         return res.status(403).json({ error: 'Only owner or manager can restore items' });
       }
       const db = getDatabase();

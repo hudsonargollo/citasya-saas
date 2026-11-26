@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { v4 as uuidv4 } from 'uuid';
 import { getDatabase, now } from '../db';
+import { currentTenantSlug } from '../db';
 
 const router = Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'cixnailartist-local-secret-change-in-production';
@@ -15,8 +16,8 @@ function buildLocalTenant(db: ReturnType<typeof getDatabase>, userRole: string) 
   return {
     id: 1,
     business_name:   s.business_name   || 'Cix Nail Artist',
-    slug:            'local',
-    database_name:   'local',
+    slug:            currentTenantSlug() || 'local',
+    database_name:   currentTenantSlug() || 'local',
     business_type:   'salon',
     country:         s.country         || 'BO',
     currency:        s.currency        || 'BOB',
@@ -46,7 +47,7 @@ router.post('/login', (req: Request, res: Response) => {
     const user = resolveUser(db, identifier, password);
     if (!user) return res.status(401).json({ error: 'Invalid credentials' });
 
-    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role, phone: user.phone }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const token = jwt.sign({ userId: user.id, email: user.email, role: user.role, phone: user.phone, tenantSlug: currentTenantSlug() }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     const tenant = buildLocalTenant(db, user.role);
 
     res.json({
@@ -74,7 +75,7 @@ router.post('/tenants/select', (req: Request, res: Response) => {
     if (!user) return res.status(404).json({ error: 'User not found' });
 
     const tenant = buildLocalTenant(db, user.role);
-    const newToken = jwt.sign({ userId: user.id, email: user.email, role: user.role, tenantId: 1 }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const newToken = jwt.sign({ userId: user.id, email: user.email, role: user.role, tenantSlug: currentTenantSlug() }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
 
     res.json({ access_token: newToken, token_type: 'bearer', tenant });
   } catch {
@@ -160,7 +161,7 @@ router.post('/setup/initialize', (req: Request, res: Response) => {
     db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('business_type', 'salon', ?)`).run(now());
     if (business_name) db.prepare(`INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('business_name', ?, ?)`).run(business_name, now());
 
-    const token = jwt.sign({ userId, email, role: 'owner', phone: phoneDigits }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const token = jwt.sign({ userId, email, role: 'owner', phone: phoneDigits, tenantSlug: currentTenantSlug() }, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
     const tenant = buildLocalTenant(db, 'owner');
 
     res.json({

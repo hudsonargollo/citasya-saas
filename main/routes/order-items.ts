@@ -29,8 +29,8 @@ router.patch('/:id/status', (req: Request, res: Response) => {
 router.patch('/:orderId/items/:itemId/cancel', (req: Request, res: Response) => {
   try {
     const { orderId, itemId } = req.params;
-    const userRole = req.headers['x-user-role'] as string;
-    if (!userRole || !['owner', 'manager'].includes(userRole.toLowerCase())) {
+    const userRole = req.user?.role || '';
+    if (!['owner', 'manager'].includes(userRole.toLowerCase())) {
       return res.status(403).json({ error: 'Only owner or manager can cancel items' });
     }
 
@@ -61,8 +61,8 @@ router.patch('/:orderId/items/:itemId/cancel', (req: Request, res: Response) => 
 router.patch('/:orderId/items/:itemId/restore', (req: Request, res: Response) => {
   try {
     const { orderId, itemId } = req.params;
-    const userRole = req.headers['x-user-role'] as string;
-    if (!userRole || !['owner', 'manager'].includes(userRole.toLowerCase())) {
+    const userRole = req.user?.role || '';
+    if (!['owner', 'manager'].includes(userRole.toLowerCase())) {
       return res.status(403).json({ error: 'Only owner or manager can restore items' });
     }
 

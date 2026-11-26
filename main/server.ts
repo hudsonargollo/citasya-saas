@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import { registerRoutes } from './routes';
 import { startNotificationServer } from './notification-server';
 import { tenantMiddleware } from './middleware/tenant';
+import { apiAuthGuard } from './middleware/auth';
 
 let server: http.Server | null = null;
 let app: Express;
@@ -37,6 +38,7 @@ export function startServer(): Promise<void> {
     app.use(cors());
     app.use(express.json());
     app.use(tenantMiddleware);
+    app.use('/api', apiAuthGuard);
 
     app.get('/api/health', (_req: Request, res: Response) => {
       res.json({
