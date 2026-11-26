@@ -2,10 +2,26 @@ import Database from 'better-sqlite3';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as bcrypt from 'bcryptjs';
+import { AsyncLocalStorage } from 'async_hooks';
 
 export const SCHEMA_VERSION = 2;
 
-let db: Database.Database;
+// Per-tenant DB context. AsyncLocalStorage keeps every existing getDatabase()
+// call site tenant-correct without threading a db argument through 20 files.
+type DbContext = { tenantSlug: string };
+const dbContext = new AsyncLocalStorage<DbContext>();
+const dbByTenant = new Map<string, Database.Database>();
+
+let defaultDb: Database.Database;
+let defaultDbPath: string;
+
+export function runWithTenant<T>(slug: string, fn: () => T): T {
+  return dbContext.run({ tenantSlug: slug }, fn);
+}
+
+export function currentTenantSlug(): string | null {
+  return dbContext.getStore()?.tenantSlug ?? null;
+}
 
 // Electron's app.getPath('userData') when packaged; CIXNAILARTIST_DATA_DIR overrides
 // for headless (web) deployments; project root fallback for dev.
@@ -23,12 +39,21 @@ function resolveDataDir(): string {
   return path.join(__dirname, '../');
 }
 
-export function getDbPath(): string {
-  return path.join(resolveDataDir(), 'cixnailartist.db');
+export function getDbPath(slug?: string): string {
+  const root = resolveDataDir();
+  const tenant = slug ?? currentTenantSlug();
+  return tenant
+    ? path.join(root, tenant, 'cixnailartist.db')
+    : path.join(root, 'cixnailartist.db');
 }
 
-function getBackupDir(): string {
-  return path.join(resolveDataDir(), 'backups');
+export function tenantDataDir(slug: string): string {
+  return path.join(resolveDataDir(), slug);
+}
+
+function getBackupDir(slug?: string): string {
+  const tenant = slug ?? currentTenantSlug();
+  return tenant ? path.join(resolveDataDir(), tenant, 'backups') : path.join(resolveDataDir(), 'backups');
 }
 
 function getAppVersion(): string {
@@ -46,35 +71,48 @@ function getAppVersion(): string {
   }
 }
 
-export function initDatabase(): void {
-  const dbPath = getDbPath();
-  const backupDir = getBackupDir();
+export function initDatabase(slug?: string, dataDirOverride?: string): void {
+  const dbPath = dataDirOverride
+    ? path.join(dataDirOverride, 'cixnailartist.db')
+    : getDbPath(slug);
+  const backupDir = dataDirOverride
+    ? path.join(dataDirOverride, 'backups')
+    : getBackupDir(slug);
 
   if (!fs.existsSync(backupDir)) {
     fs.mkdirSync(backupDir, { recursive: true });
   }
 
   console.log(`[DB] Opening database at: ${dbPath}`);
-  db = new Database(dbPath);
+  const db = new Database(dbPath);
+  // Register before migrations: internal helpers call getDatabase() via the
+  // active tenant context (or the default handle for single-tenant mode).
+  if (slug) dbByTenant.set(slug, db); else defaultDb = db;
   db.pragma('journal_mode = WAL');
   db.pragma('synchronous = NORMAL');
   db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = OFF');
 
-  runMigrations();
-
-  db.pragma('foreign_keys = ON');
-
-  runStartupIntegrityCheck();
-  autoRepairPaymentDetails();
+  // Internal helpers resolve getDatabase() from the active context; bind it
+  // to this tenant during initialization (no-op in single-tenant mode).
+  const finish = () => {
+    db.pragma('foreign_keys = ON');
+    runStartupIntegrityCheck();
+    autoRepairPaymentDetails();
+  };
+  if (slug) runWithTenant(slug, () => { runMigrations(); finish(); });
+  else { runMigrations(); finish(); }
+  defaultDbPath = dbPath;
 }
 
 export function withTxn<T>(fn: () => T): T {
-  return db.transaction(fn)();
+  const handleDb = getDatabase();
+  return handleDb.transaction(fn)();
 }
 
 export function appendJsonArray(table: string, idColumn: string, idValue: any, column: string, value: any): void {
-  const row = db.prepare(`SELECT ${column} AS v FROM ${table} WHERE ${idColumn} = ?`).get(idValue) as any;
+  const handleDb = getDatabase();
+  const row = handleDb.prepare(`SELECT ${column} AS v FROM ${table} WHERE ${idColumn} = ?`).get(idValue) as any;
   let arr: any[] = [];
   if (row && row.v) {
     try {
@@ -85,12 +123,13 @@ export function appendJsonArray(table: string, idColumn: string, idValue: any, c
     }
   }
   arr.push(value);
-  db.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${idColumn} = ?`).run(JSON.stringify(arr), idValue);
+  handleDb.prepare(`UPDATE ${table} SET ${column} = ? WHERE ${idColumn} = ?`).run(JSON.stringify(arr), idValue);
 }
 
 function runStartupIntegrityCheck(): void {
+  const handleDb = getDatabase();
   try {
-    const integrity = db.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
+    const integrity = handleDb.prepare('PRAGMA integrity_check').all() as { integrity_check: string }[];
     const bad = integrity.filter((r) => r.integrity_check !== 'ok');
     if (bad.length > 0) {
       console.error('[DB] ⚠ integrity_check issues:', bad.map((r) => r.integrity_check).join('; '));
@@ -98,7 +137,7 @@ function runStartupIntegrityCheck(): void {
       console.log('[DB] integrity_check: ok');
     }
 
-    const fkViolations = db.prepare('PRAGMA foreign_key_check').all() as any[];
+    const fkViolations = handleDb.prepare('PRAGMA foreign_key_check').all() as any[];
     if (fkViolations.length > 0) {
       console.error(`[DB] ⚠ ${fkViolations.length} foreign-key violation(s):`, fkViolations.slice(0, 5));
     } else {
@@ -110,8 +149,9 @@ function runStartupIntegrityCheck(): void {
 }
 
 function autoRepairPaymentDetails(): void {
+  const handleDb = getDatabase();
   try {
-    const rows = db.prepare(`SELECT id, payment_details, paid_amount FROM bills WHERE payment_details IS NOT NULL AND payment_details != ''`).all() as any[];
+    const rows = handleDb.prepare(`SELECT id, payment_details, paid_amount FROM bills WHERE payment_details IS NOT NULL AND payment_details != ''`).all() as any[];
     const toFix: { id: number; value: string }[] = [];
 
     for (const row of rows) {
@@ -140,8 +180,8 @@ function autoRepairPaymentDetails(): void {
 
     if (toFix.length === 0) return;
 
-    const stmt = db.prepare(`UPDATE bills SET payment_details = ?, updated_at = datetime('now') WHERE id = ?`);
-    const tx = db.transaction((rows: { id: number; value: string }[]) => {
+    const stmt = handleDb.prepare(`UPDATE bills SET payment_details = ?, updated_at = datetime('now') WHERE id = ?`);
+    const tx = handleDb.transaction((rows: { id: number; value: string }[]) => {
       for (const r of rows) stmt.run(r.value, r.id);
     });
     tx(toFix);
@@ -151,19 +191,37 @@ function autoRepairPaymentDetails(): void {
   }
 }
 
+
 export function getDatabase(): Database.Database {
-  if (!db) throw new Error('Database not initialized');
-  return db;
+  const slug = currentTenantSlug();
+  if (slug) {
+    const tenantDb = dbByTenant.get(slug);
+    if (!tenantDb) throw new Error(`Database not initialized for tenant: ${slug}`);
+    return tenantDb;
+  }
+  if (!defaultDb) throw new Error('Database not initialized');
+  return defaultDb;
 }
 
 export function closeDatabase(): void {
-  if (db) {
-    db.close();
-    console.log('[DB] Database closed');
+  for (const [slug, tenantDb] of dbByTenant) {
+    tenantDb.close();
+    console.log(`[DB] Database closed for tenant: ${slug}`);
+  }
+  dbByTenant.clear();
+  if (defaultDb) {
+    defaultDb.close();
+    defaultDb = undefined as any;
+    console.log('[DB] Default database closed');
   }
 }
 
+export function initializedTenants(): string[] {
+  return [...dbByTenant.keys()];
+}
+
 export async function createBackup(targetPath?: string): Promise<{ path: string; schemaVersion: number }> {
+  const handleDb = getDatabase();
   const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
   const backupDir = getBackupDir();
 
@@ -173,7 +231,7 @@ export async function createBackup(targetPath?: string): Promise<{ path: string;
 
   const backupPath = targetPath || path.join(backupDir, `cixnailartist-backup-${timestamp}.db`);
 
-  await db.backup(backupPath);
+  await handleDb.backup(backupPath);
 
   const backupDb = new Database(backupPath);
   backupDb.exec(`CREATE TABLE IF NOT EXISTS _flo_meta (key TEXT PRIMARY KEY, value TEXT)`);
@@ -282,8 +340,9 @@ export function getSchemaVersionFromBackup(backupPath: string): number {
 }
 
 function getCurrentSchemaVersion(): number {
+  const handleDb = getDatabase();
   try {
-    const row = db.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get() as any;
+    const row = handleDb.prepare("SELECT value FROM settings WHERE key = 'schema_version'").get() as any;
     return row ? parseInt(row.value, 10) : 0;
   } catch {
     return 0;
@@ -291,9 +350,10 @@ function getCurrentSchemaVersion(): number {
 }
 
 function runMigrations(): void {
+  const handleDb = getDatabase();
   console.log('[DB] Running migrations...');
 
-  db.exec(`CREATE TABLE IF NOT EXISTS settings (
+  handleDb.exec(`CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT,
     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -319,15 +379,15 @@ function runMigrations(): void {
 
   // Legacy DBs were created without users.phone, but login queries/updates it.
   // PRAGMA returns one row per column — use .all(), not .get().
-  if (!getColumns(db, 'users').includes('phone')) {
-    db.exec('ALTER TABLE users ADD COLUMN phone TEXT');
+  if (!getColumns(handleDb, 'users').includes('phone')) {
+    handleDb.exec('ALTER TABLE users ADD COLUMN phone TEXT');
   }
 
   // Service card images: products.image_key names a file in
   // frontend/public/cixnails/services/<image_key>.webp. Added after the fact so
   // existing installs self-heal on startup; then fill it for the Cix catalog.
-  if (!getColumns(db, 'products').includes('image_key')) {
-    db.exec('ALTER TABLE products ADD COLUMN image_key TEXT');
+  if (!getColumns(handleDb, 'products').includes('image_key')) {
+    handleDb.exec('ALTER TABLE products ADD COLUMN image_key TEXT');
   }
   seedServiceImageKeys();
 
@@ -337,6 +397,7 @@ function runMigrations(): void {
 // Rewrite only known BR/India placeholder values; leave anything the salon
 // has actually configured untouched. Runs on every startup (idempotent).
 function normalizeBoliviaDefaults(): void {
+  const handleDb = getDatabase();
   const normalize: Record<string, Record<string, string>> = {
     country:                 { BR: 'BO', IN: 'BO', TH: 'BO', '': 'BO' },
     currency:                { BRL: 'BOB', INR: 'BOB', THB: 'BOB', '': 'BOB' },
@@ -344,8 +405,8 @@ function normalizeBoliviaDefaults(): void {
     timezone:                { 'America/Sao_Paulo': 'America/La_Paz', 'Asia/Kolkata': 'America/La_Paz', 'Asia/Bangkok': 'America/La_Paz', '': 'America/La_Paz' },
     state_code:              { '': '' },
   };
-  const stmt = db.prepare('SELECT value FROM settings WHERE key = ?');
-  const update = db.prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?');
+  const stmt = handleDb.prepare('SELECT value FROM settings WHERE key = ?');
+  const update = handleDb.prepare('UPDATE settings SET value = ?, updated_at = ? WHERE key = ?');
   for (const [key, map] of Object.entries(normalize)) {
     const row = stmt.get(key) as { value: string } | undefined;
     if (!row) continue;
@@ -357,7 +418,8 @@ function normalizeBoliviaDefaults(): void {
 // Ensure branch storage exists on every install (including pre-branch DBs).
 // Seed rows use INSERT OR IGNORE so deleted/edited branches stay deleted/edited.
 function ensureBranchTable(): void {
-  db.exec(`
+  const handleDb = getDatabase();
+  handleDb.exec(`
     CREATE TABLE IF NOT EXISTS branches (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -372,21 +434,22 @@ function ensureBranchTable(): void {
     )
   `);
   // Older installs may lack deleted_at — add it before seeding/querying.
-  if (!getColumns(db, 'branches').includes('deleted_at')) {
-    db.exec('ALTER TABLE branches ADD COLUMN deleted_at TEXT');
+  if (!getColumns(handleDb, 'branches').includes('deleted_at')) {
+    handleDb.exec('ALTER TABLE branches ADD COLUMN deleted_at TEXT');
   }
   const seed = [
     ['cix-central', 'CIX Central', 'Zona Norte · Av. Beni', 'https://wa.me/message/SGYOW5XIK73RP1', 'https://maps.app.goo.gl/xiD6tQbQ9jn4egry9', 1],
     ['cix-equipetrol', 'CIX Equipetrol', 'Zona Equipetrol', 'https://api.whatsapp.com/send?phone=59167943253', 'https://maps.app.goo.gl/hLMgcDFuUdGJR9Xr9', 2],
     ['cix-urbari', 'CIX Urbarí', 'Zona Urbarí y Las Palmas', 'https://api.whatsapp.com/send?phone=59168906506', 'https://maps.app.goo.gl/pQu2CgVUhfLFa5Y99', 3],
   ];
-  const insert = db.prepare(`INSERT OR IGNORE INTO branches (id, name, zone, whatsapp_url, maps_url, is_active, sort_order, created_at, updated_at)
+  const insert = handleDb.prepare(`INSERT OR IGNORE INTO branches (id, name, zone, whatsapp_url, maps_url, is_active, sort_order, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)`);
   for (const [id, name, zone, wa, maps, order] of seed) insert.run(id, name, zone, wa, maps, order, now(), now());
 }
 
 function createSchema(): void {
-  db.exec(`
+  const handleDb = getDatabase();
+  handleDb.exec(`
     -- ── Master data ──────────────────────────────────────────────────────
 
     CREATE TABLE IF NOT EXISTS branches (
@@ -673,8 +736,9 @@ function createSchema(): void {
 }
 
 function seedData(): void {
+  const handleDb = getDatabase();
   const insert = (key: string, value: string) =>
-    db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    handleDb.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
   insert('schema_version',       String(SCHEMA_VERSION));
   insert('business_name',        'Cix Nail Artist');
@@ -699,12 +763,12 @@ function seedData(): void {
   seedBookingSettings();
 
   const hashedPassword = bcrypt.hashSync('cixnail123', 10);
-  db.prepare(`INSERT OR IGNORE INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)`).run('user-1', 'Cix Nails Artist', 'admin@cixnailartist.com', hashedPassword, 'owner');
+  handleDb.prepare(`INSERT OR IGNORE INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)`).run('user-1', 'Cix Nails Artist', 'admin@cixnailartist.com', hashedPassword, 'owner');
 
   const stylistPassword = bcrypt.hashSync('stylist123', 10);
-  db.prepare(`INSERT OR IGNORE INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)`).run('user-2', 'Nail Artist', 'artist@cixnailartist.com', stylistPassword, 'stylist');
+  handleDb.prepare(`INSERT OR IGNORE INTO users (id, name, email, password, role) VALUES (?, ?, ?, ?, ?)`).run('user-2', 'Nail Artist', 'artist@cixnailartist.com', stylistPassword, 'stylist');
 
-  db.prepare(`INSERT OR IGNORE INTO printers (id, name, connection_type, paper_width, is_default) VALUES (?, ?, ?, ?, ?)`).run('printer-1', 'Thermal Printer', 'usb', '80mm', 1);
+  handleDb.prepare(`INSERT OR IGNORE INTO printers (id, name, connection_type, paper_width, is_default) VALUES (?, ?, ?, ?, ?)`).run('printer-1', 'Thermal Printer', 'usb', '80mm', 1);
 
   seedCixCatalog();
 
@@ -712,8 +776,9 @@ function seedData(): void {
 }
 
 function seedBookingSettings(): void {
+  const handleDb = getDatabase();
   const insert = (key: string, value: string) =>
-    db.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
+    handleDb.prepare('INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)').run(key, value);
 
   insert('loyalty_enabled',        'true');
   insert('loyalty_threshold',      '10');
@@ -736,6 +801,7 @@ function seedBookingSettings(): void {
 }
 
 function seedCixCatalog(): void {
+  const handleDb = getDatabase();
   const cats = [
     ['cix-cat-destaques', 'Destacados', '#A65A4C', 'combo', 1, 'Manicuras y pedicuras más solicitadas'],
     ['cix-cat-manicura',  'Manicura',    '#C4897C', 'manicura', 2, 'Tradicional, acrílico, gel y otros'],
@@ -743,7 +809,7 @@ function seedCixCatalog(): void {
     ['cix-cat-combos',    'Combos',      '#8E4E43', 'combo', 4, 'Manos y pies en un solo momento'],
   ];
   for (const [id, name, color, icon, sort, description] of cats) {
-    db.prepare(`
+    handleDb.prepare(`
       INSERT OR IGNORE INTO categories (id, name, description, color, icon, sort_order, is_active)
       VALUES (?, ?, ?, ?, ?, ?, 1)
     `).run(id, name, description, color, icon, sort);
@@ -787,7 +853,7 @@ function seedCixCatalog(): void {
       'Acrílico en manos y acripie en pies, con decoración incluida.', 200, 210, 3],
   ];
 
-  const insertProduct = db.prepare(`
+  const insertProduct = handleDb.prepare(`
     INSERT OR IGNORE INTO products
       (id, category_id, name, description, price, service_duration_minutes, kind, sort_order, is_active, tax_type, tax_rate)
     VALUES (?, ?, ?, ?, ?, ?, 'service', ?, 1, 'none', 0)
@@ -797,7 +863,7 @@ function seedCixCatalog(): void {
   }
 
   // Keep icons current on existing databases too.
-  const setCategoryIcon = db.prepare('UPDATE categories SET icon = ? WHERE id = ?');
+  const setCategoryIcon = handleDb.prepare('UPDATE categories SET icon = ? WHERE id = ?');
   for (const [id, , , icon] of cats) setCategoryIcon.run(icon, id);
 }
 
@@ -824,15 +890,17 @@ const SERVICE_IMAGE_KEYS: Record<string, string> = {
 };
 
 function seedServiceImageKeys(): void {
-  const update = db.prepare(
+  const handleDb = getDatabase();
+  const update = handleDb.prepare(
     "UPDATE products SET image_key = ?, updated_at = ? WHERE id = ? AND (image_key IS NULL OR image_key = '')"
   );
   for (const [id, key] of Object.entries(SERVICE_IMAGE_KEYS)) update.run(key, now(), id);
 }
 function migrateToV2(): void {
+  const handleDb = getDatabase();
   console.log('[DB] Migrating schema v1 → v2 (appointments)');
 
-  db.exec(`
+  handleDb.exec(`
     CREATE TABLE IF NOT EXISTS appointments (
       id TEXT PRIMARY KEY,
       appointment_number TEXT UNIQUE NOT NULL,
@@ -874,10 +942,10 @@ function migrateToV2(): void {
 
   seedBookingSettings();
 
-  const businessName = (db.prepare("SELECT value FROM settings WHERE key = 'business_name'").get() as any)?.value;
+  const businessName = (handleDb.prepare("SELECT value FROM settings WHERE key = 'business_name'").get() as any)?.value;
   if (!businessName || businessName === 'My Salon') {
     const update = (key: string, value: string) =>
-      db.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)').run(key, value, now());
+      handleDb.prepare('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)').run(key, value, now());
     update('business_name', 'Cix Nail Artist');
     update('business_tagline', 'Manicura y Pedicura · Santa Cruz');
     update('country', 'BO');
@@ -890,28 +958,31 @@ function migrateToV2(): void {
     seedCixCatalog();
   }
 
-  db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?, ?)").run(String(SCHEMA_VERSION), now());
+  handleDb.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES ('schema_version', ?, ?)").run(String(SCHEMA_VERSION), now());
 }
 
 export function generateOrderNumber(): string {
+  const handleDb = getDatabase();
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const result = db.prepare(
+  const result = handleDb.prepare(
     "SELECT COUNT(*) + 1 as next FROM orders WHERE date(created_at) = date('now')"
   ).get() as { next: number };
   return `TKT-${date}-${String(result.next).padStart(4, '0')}`;
 }
 
 export function generateBillNumber(): string {
+  const handleDb = getDatabase();
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const result = db.prepare(
+  const result = handleDb.prepare(
     "SELECT COUNT(*) + 1 as next FROM bills WHERE date(created_at) = date('now')"
   ).get() as { next: number };
   return `INV-${date}-${String(result.next).padStart(4, '0')}`;
 }
 
 export function generateAppointmentNumber(): string {
+  const handleDb = getDatabase();
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const result = db.prepare(
+  const result = handleDb.prepare(
     "SELECT COUNT(*) + 1 as next FROM appointments WHERE date(created_at) = date('now')"
   ).get() as { next: number };
   return `AGD-${date}-${String(result.next).padStart(4, '0')}`;
